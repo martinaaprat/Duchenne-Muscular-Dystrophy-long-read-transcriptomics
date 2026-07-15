@@ -1,0 +1,254 @@
+# This script performs gene-level quantification using Rsubread: featureCounts from position-sorted BAM files, followed by differential expression analysis using DESeq2.
+
+# In Linux
+
+
+# Move to RStudio
+
+# 1. Package installation & activation
+
+# Install Bioconductor manager if not present
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+  install.packages("BiocManager")
+}
+
+# Install Rsubread package if needed
+# BiocManager::install("Rsubread")
+
+library(Rsubread)
+library(DESeq2)
+library(ggplot2)
+library(pheatmap)
+library(reshape2)
+library(ggrepel)
+
+# 2. Workspace setup & metadata
+
+# Set working directory (Update to your local output folder)
+setwd("<working_dir>/04_Minimap_BAM_FC_DESeq2")
+
+# Define sample metadata
+metadata <- data.frame(
+  Sample = c("BC09","BC10","BC11","BC13","BC15","BC16"),
+  Condition = c("WT","WT","WT","Mdx","Mdx","Mdx"),
+  label = c("WT5","WT6","WT14","Mdx2","Mdx15","Mdx90")
+)
+rownames(metadata) <- metadata$Sample
+
+# 3. Locate input BAM files
+
+bam_dir <- "<input_bam_dir>/04_Minimap_psorted_BAM"
+
+bam_files <- list.files(
+  bam_dir,
+  pattern = "aln.positionsorted_.*\\.bam$",
+  full.names = TRUE
+)
+
+names(bam_files) <- gsub("aln.positionsorted_|\\.bam", "", basename(bam_files))
+
+# 4. FeatureCounts (Gene-level assignment)
+
+fc <- featureCounts(
+  files = bam_files,
+  annot.ext = "<gtf_annotation_file>/GCF_000001635.27/genomic.gtf",
+  isGTFAnnotationFile = TRUE,
+  GTF.featureType = "exon",
+  GTF.attrType = "gene_id",
+  useMetaFeatures = TRUE,
+  isPairedEnd = FALSE   # Single-end sequencing dataset
+)
+
+counts <- fc$counts
+
+# Clean column headers
+colnames(counts) <- gsub("aln.positionsorted_|\\.bam", "", colnames(counts))
+
+# Reorder columns to match metadata samples
+counts <- counts[, metadata$Sample]
+
+# 5. DESeq2 processing & statistical modeling
+
+# Construct DESeqDataSet
+dds <- DESeqDataSetFromMatrix(
+  countData = counts,
+  colData = metadata,
+  design = ~Condition
+)
+
+# Filter out low-expressed genes (at least 10 reads aggregated across samples)
+dds <- dds[rowSums(counts(dds)) >= 10, ]
+
+# Run differential expression analysis
+dds <- DESeq(dds)
+res <- results(dds)
+
+# Apply log2 fold change shrinkage using the apeglm method
+res <- lfcShrink(
+  dds,
+  coef = 2,
+  type = "apeglm"
+)
+
+res_df <- as.data.frame(res)
+res_df$Gene <- rownames(res_df)
+
+# Establish significance flags
+res_df$DEG_flag <- res_df$padj < 0.05 & abs(res_df$log2FoldChange) > 1
+res_df$Up_in <- ifelse(res_df$log2FoldChange > 0, "WT", "Mdx")
+
+# 6. Data normalization & transformation
+
+# Apply Variance-Stabilizing Transformation (vst) for clustering/plots
+vsd <- vst(dds, blind = FALSE)
+expr <- assay(vsd)
+
+# 7. Data visualization
+
+# --- Violin Plot ---
+df <- melt(expr)
+colnames(df) <- c("Gene", "Sample", "Expression")
+
+df$Label <- metadata[df$Sample, "label"]
+df$Condition <- metadata[df$Sample, "Condition"]
+
+# Set factor levels for consistent sample ordering
+orden <- c("WT5","WT6","WT14","Mdx2","Mdx15","Mdx90")
+df$Label <- factor(df$Label, levels = orden)
+
+p_violin <- ggplot(df, aes(Label, Expression, fill = Condition)) +
+  geom_violin(alpha = 0.7, trim = TRUE, color = "black") +
+  scale_fill_manual(values = c(
+    "WT" = "skyblue",
+    "Mdx" = "maroon4"
+  )) +
+  coord_cartesian(ylim = c(
+    quantile(df$Expression, 0.01),
+    quantile(df$Expression, 0.99)
+  )) +
+  theme_bw() +
+  labs(
+    title = "Expression Distribution across Samples",
+    x = "Sample",
+    y = "vst Normalized Expression"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5)
+  )
+print(p_violin)
+
+# --- Principal Component Analysis (PCA) ---
+pca <- prcomp(t(expr))
+percentVar <- round(100 * (pca$sdev^2 / sum(pca$sdev^2)), 1)
+
+pca_df <- data.frame(pca$x, metadata)
+
+p_pca <- ggplot(pca_df, aes(PC1, PC2, color = Condition)) +
+  geom_point(size = 5) +
+  geom_text_repel(aes(label = label), size = 4) +
+  scale_color_manual(values = c(
+    "WT" = "skyblue",
+    "Mdx" = "maroon4"
+  )) +
+  theme_bw() +
+  labs(
+    x = paste0("PC1 (", percentVar[1], "%)"),
+    y = paste0("PC2 (", percentVar[2], "%)"),
+    title = "Principal Component Analysis (PCA)"
+  )
+print(p_pca)
+
+# --- Volcano Plot ---
+res_df$Significant <- ifelse(
+  !is.na(res_df$padj) & res_df$padj < 0.05 & abs(res_df$log2FoldChange) > 1,
+  "YES",
+  "NO"
+)
+
+p_volcano <- ggplot(res_df, aes(log2FoldChange, -log10(padj), color = Significant)) +
+  geom_point(alpha = 0.7, size = 1.5) +
+  geom_hline(
+    yintercept = -log10(0.05),
+    linetype = "dashed",
+    color = "black"
+  ) +
+  geom_vline(
+    xintercept = c(-1, 1),
+    linetype = "dashed",
+    color = "black"
+  ) +
+  scale_color_manual(values = c(
+    "NO" = "grey70",
+    "YES" = "#D55E00"
+  )) +
+  theme_bw() +
+  labs(
+    title = "Differential Expression Volcano Plot",
+    x = "log2 Fold Change",
+    y = "-log10(padj)",
+    color = "Significant"
+  )
+print(p_volcano)
+
+# 8. Heatmap of Differentially Expressed Genes (DEGs)
+
+sig <- res_df$Gene[res_df$DEG_flag == TRUE]
+sig <- intersect(sig, rownames(expr))
+
+mat <- expr[sig, ]
+
+metadata_ordered <- metadata[colnames(mat), ]
+colnames(mat) <- metadata_ordered$label
+
+# Reorder matrix columns to match requested layout
+mat <- mat[, orden]
+
+pheatmap(
+  mat,
+  scale = "row",
+  fontsize_row = 4,
+  fontsize_col = 10,
+  cluster_cols = TRUE,
+  show_rownames = FALSE
+)
+
+# 9. Data export
+
+# Export statistics
+write.csv2(
+  res_df,
+  "All_genes_featureCounts_DESeq2.csv",
+  row.names = FALSE
+)
+
+# Export matrix
+norm_counts <- counts(dds, normalized = TRUE)
+expr_df <- as.data.frame(norm_counts)
+expr_df$Gene <- rownames(expr_df)
+expr_df <- expr_df[, c("Gene", colnames(norm_counts))]
+
+write.csv2(
+  expr_df,
+  "Expression_matrix_normalized_counts.csv",
+  row.names = FALSE
+)
+
+# 10. Temporary file cleanup
+
+gc()
+
+temp_files <- list.files(
+  path = getwd(),
+  pattern = "fixbam",
+  full.names = TRUE
+)
+
+print(temp_files)
+
+if (length(temp_files) > 0) {
+  unlink(temp_files, force = TRUE)
+  cat("Temporary scratch files successfully removed.\n")
+} else {
+  cat("No temporary scratch files found.\n")
+}
