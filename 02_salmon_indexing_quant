@@ -1,0 +1,18 @@
+#After the 4 steps in the **01_preprocessing_common**, you can proceed with the following steps. 
+
+
+conda activate salmon
+
+# Reference transcriptome from NCBI dataset is required
+salmon index \
+  -t "<reference_genome_dir>/GCF_000001635.27/rna.fna" \
+  -i "<output_dir>/05_salmon/salmon_index" \
+  -p 8
+
+# Template command for an individual barcode quantification (e.g., BC09)
+salmon quant \
+  -i "<output_dir>/05_salmon/salmon_index" \
+  -l A \
+  -r "<output_dir>/03_fastq_output/<sample_barcode>.fastq" \
+  -o "<output_dir>/05_salmon/<barcode_ID>" \
+  -p 8
