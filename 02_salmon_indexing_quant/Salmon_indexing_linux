@@ -1,0 +1,21 @@
+# After the 4 steps in the **01_preprocessing_common**, you can proceed with the following steps. 
+
+# 01_Salmon_indexing
+conda activate salmon
+
+# Reference transcriptome from NCBI dataset is required
+salmon index \
+  -t "<reference_transcriptome_dir>/rna.fna" \
+  -i "<output_dir>/04_salmon/salmon_index" \
+  -p 8
+
+# Template command for an individual barcode quantification
+salmon quant \
+  -i "<output_dir>/04_salmon/salmon_index" \
+  -l A \
+  -r "<output_dir>/03_fastq_output/<sample_barcode>.fastq" \
+  -o "<output_dir>/04_salmon/<barcode_ID>" \
+  -p 8
+
+# 02_Select_pipeline
+# Once the Salmon .sf files are obstained, you can move onto RStudio to proceed, with the three variants of Pipeline 1 (1A, 1B and 1C)
