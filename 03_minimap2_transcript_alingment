@@ -1,18 +1,8 @@
-# This script performs transcript-level quantification using Salmon output files generated from MinimapTranscriptome alignments, followed by differential expression analysis using DESeq2.
+# This script performs transcript-level quantification using Salmon output files, followed by differential expression analysis using DESeq2.
 
 # In RStudio
 
 # 1. Package installation & activation
-
-# Install Bioconductor manager if not present
-if (!requireNamespace("BiocManager", quietly = TRUE)) {
-  install.packages("BiocManager")
-}
-
-# Install required Bioconductor packages if needed
-# BiocManager::install("tximport")
-# BiocManager::install("DESeq2")
-# BiocManager::install("apeglm")
 
 library(tximport)
 library(DESeq2)
@@ -21,6 +11,9 @@ library(ggplot2)
 library(pheatmap)
 library(reshape2)
 library(ggrepel)
+
+rm(list = ls())
+graphics.off()
 
 # 2. Workspace setup & metadata
 
@@ -36,300 +29,188 @@ metadata <- data.frame(
 
 rownames(metadata) <- metadata$Sample
 
-# Set reference level for differential expression analysis
-metadata$Condition <- factor(
-  metadata$Condition,
-  levels = c("Mdx", "WT")
-)
+#asegurar WT vs Mdx
+metadata$Condition <- factor(metadata$Condition, levels = c("Mdx", "WT"))
 
 # 3. Locate input Salmon files
 
-salmon_dir <- "<input_salmon_dir>"
-
 files <- list.files(
-  salmon_dir,
+  "<input_salmon_dir>",
   pattern = "quant_.*\\.sf$",
   full.names = TRUE
 )
 
-names(files) <- gsub(
-  "quant_|\\.sf",
-  "",
-  basename(files)
-)
+names(files) <- gsub("quant_|\\.sf", "", basename(files))
 
-# 4. Transcript-level quantification with tximport
+# 4. tximport (Transcript-level quantification)
 
-# Import Salmon transcript-level quantification
 txi <- tximport(
   files,
   type = "salmon",
-  txOut = TRUE
+  txOut = TRUE   #importante (transcript-level)
 )
 
 # 5. DESeq2 processing & statistical modeling
 
-# Construct DESeqDataSet from tximport data
 dds <- DESeqDataSetFromTximport(
   txi,
   colData = metadata,
   design = ~Condition
 )
 
-# Filter out low-expressed transcripts
+# 6. Filtering
+
 dds <- dds[rowSums(counts(dds)) >= 10, ]
 
-# Run differential expression analysis
+# 7. Differential expression analysis
+
 dds <- DESeq(dds)
+
 res <- results(dds)
 
-# Apply log2 fold change shrinkage using the apeglm method
 res <- lfcShrink(
   dds,
   coef = 2,
   type = "apeglm"
 )
 
+# 8. Results dataframe
+
 res_df <- as.data.frame(res)
 res_df$Gene <- rownames(res_df)
 
-# Remove ":" from transcript identifiers
+# limpiar posibles ":" (muy importante)
 res_df$Gene <- gsub(":", "", res_df$Gene)
 
-# Establish significance flags
-res_df$DEG_flag <- (
-  !is.na(res_df$padj) &
+# Añadir columnas como en otros pipelines
+
+res_df$DEG_flag <- (!is.na(res_df$padj)) &
   res_df$padj < 0.05 &
   abs(res_df$log2FoldChange) > 1
+
+res_df$Up_in <- ifelse(res_df$log2FoldChange > 0, "WT", "Mdx")
+
+# 9. Data export
+
+# Export all genes
+write.csv2(
+  res_df,
+  "All_genes_SalmonTranscriptome_DESeq2.csv",
+  row.names = FALSE
 )
 
-res_df$Up_in <- ifelse(
-  res_df$log2FoldChange > 0,
-  "WT",
-  "Mdx"
-)
+# 10. Data normalization & transformation
 
-# 6. Data normalization & transformation
-
-# Apply Variance-Stabilizing Transformation (vst) for clustering/plots
-vsd <- vst(
-  dds,
-  blind = FALSE
-)
-
+vsd <- vst(dds, blind = FALSE)
 expr <- assay(vsd)
 
-# Remove ":" from transcript identifiers
-rownames(expr) <- gsub(
-  ":",
-  "",
-  rownames(expr)
-)
+# limpiar nombres
+rownames(expr) <- gsub(":", "", rownames(expr))
 
-# 7. Data visualization
+# 11. Data visualization
 
 # --- Violin Plot ---
 
 df <- melt(expr)
-colnames(df) <- c(
-  "Gene",
-  "Sample",
-  "Expression"
-)
+colnames(df) <- c("Gene","Sample","Expression")
 
-df$Label <- metadata[
-  df$Sample,
-  "label"
-]
+df$Label <- metadata[df$Sample, "label"]
+df$Condition <- metadata[df$Sample, "Condition"]
 
-df$Condition <- metadata[
-  df$Sample,
-  "Condition"
-]
+orden <- c("WT5","WT6","WT14","Mdx2","Mdx15","Mdx90")
+df$Label <- factor(df$Label, levels = orden)
 
-# Set factor levels for consistent sample ordering
-orden <- c(
-  "WT5",
-  "WT6",
-  "WT14",
-  "Mdx2",
-  "Mdx15",
-  "Mdx90"
-)
-
-df$Label <- factor(
-  df$Label,
-  levels = orden
-)
-
-p_violin <- ggplot(
-  df,
-  aes(
-    Label,
-    Expression,
-    fill = Condition
-  )
-) +
-  geom_violin(
-    alpha = 0.7,
-    trim = TRUE,
-    color = "black"
-  ) +
-  scale_fill_manual(
-    values = c(
-      "WT" = "skyblue",
-      "Mdx" = "maroon4"
-    )
-  ) +
-  coord_cartesian(
-    ylim = c(
-      quantile(df$Expression, 0.01),
-      quantile(df$Expression, 0.99)
-    )
-  ) +
+ggplot(df, aes(Label, Expression, fill = Condition)) +
+  geom_violin(alpha = 0.7, trim = TRUE, color = "black") +
+  
+  scale_fill_manual(values = c(
+    "WT" = "skyblue",
+    "Mdx" = "maroon4"
+  )) +
+  
+  coord_cartesian(ylim = c(
+    quantile(df$Expression, 0.01),
+    quantile(df$Expression, 0.99)
+  )) +
+  
   theme_bw() +
   labs(
-    title = "Expression Distribution across Samples",
+    title = "Distribución de expresión por muestra",
     x = "Sample",
-    y = "vst Normalized Expression"
+    y = "Expression"
   ) +
   theme(
-    axis.text.x = element_text(
-      angle = 45,
-      hjust = 1
-    ),
-    plot.title = element_text(
-      hjust = 0.5
-    )
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5)
   )
-
-print(p_violin)
-
 
 # --- Principal Component Analysis (PCA) ---
 
-pca <- prcomp(
-  t(expr)
-)
+pca <- prcomp(t(expr))
+percentVar <- round(100 * (pca$sdev^2 / sum(pca$sdev^2)), 1)
 
-percentVar <- round(
-  100 * (pca$sdev^2 / sum(pca$sdev^2)),
-  1
-)
+pca_df <- data.frame(pca$x, metadata)
 
-pca_df <- data.frame(
-  pca$x,
-  metadata
-)
-
-p_pca <- ggplot(
-  pca_df,
-  aes(
-    PC1,
-    PC2,
-    color = Condition
-  )
-) +
+ggplot(pca_df,
+       aes(PC1, PC2, color = Condition)) +
   geom_point(size = 5) +
-  geom_text_repel(
-    aes(label = label),
-    size = 4
-  ) +
-  scale_color_manual(
-    values = c(
-      "WT" = "skyblue",
-      "Mdx" = "maroon4"
-    )
-  ) +
+  geom_text_repel(aes(label = label), size = 4) +
+  
+  scale_color_manual(values = c(
+    "WT" = "skyblue",
+    "Mdx" = "maroon4"
+  )) +
+  
   theme_bw() +
   labs(
-    x = paste0(
-      "PC1 (",
-      percentVar[1],
-      "%)"
-    ),
-    y = paste0(
-      "PC2 (",
-      percentVar[2],
-      "%)"
-    ),
-    title = "Principal Component Analysis (PCA)"
+    x = paste0("PC1 (", percentVar[1], "%)"),
+    y = paste0("PC2 (", percentVar[2], "%)"),
+    title = "PCA"
   )
-
-print(p_pca)
-
 
 # --- Volcano Plot ---
 
 res_df$Significant <- ifelse(
-  !is.na(res_df$padj) &
-    res_df$padj < 0.05 &
-    abs(res_df$log2FoldChange) > 1,
+  res_df$DEG_flag,
   "YES",
   "NO"
 )
 
-p_volcano <- ggplot(
-  res_df,
-  aes(
-    log2FoldChange,
-    -log10(padj),
-    color = Significant
-  )
-) +
-  geom_point(
-    alpha = 0.7,
-    size = 1.5
-  ) +
-  geom_hline(
-    yintercept = -log10(0.05),
-    linetype = "dashed",
-    color = "black"
-  ) +
-  geom_vline(
-    xintercept = c(-1, 1),
-    linetype = "dashed",
-    color = "black"
-  ) +
-  scale_color_manual(
-    values = c(
-      "NO" = "grey70",
-      "YES" = "#D55E00"
-    )
-  ) +
+ggplot(res_df,
+       aes(log2FoldChange, -log10(padj), color = Significant)) +
+  geom_point(alpha = 0.7, size = 1.5) +
+  
+  geom_hline(yintercept = -log10(0.05),
+             linetype = "dashed",
+             color = "black") +
+  
+  geom_vline(xintercept = c(-1,1),
+             linetype = "dashed",
+             color = "black") +
+  
+  scale_color_manual(values = c(
+    "NO" = "grey70",
+    "YES" = "#D55E00"
+  )) +
+  
   theme_bw() +
   labs(
-    title = "Differential Expression Volcano Plot",
+    title = "Volcano plot",
     x = "log2 Fold Change",
     y = "-log10(padj)",
     color = "Significant"
   )
 
-print(p_volcano)
+# 12. Heatmap of Differentially Expressed Genes (DEGs)
 
+sig <- res_df$Gene[res_df$DEG_flag == TRUE]
 
-# 8. Heatmap of Differentially Expressed Genes (DEGs)
+sig <- intersect(sig, rownames(expr)) 
 
-sig <- res_df$Gene[
-  res_df$DEG_flag == TRUE
-]
+mat <- expr[sig,]
 
-# Keep only significant transcripts present in the expression matrix
-sig <- intersect(
-  sig,
-  rownames(expr)
-)
+colnames(mat) <- metadata[colnames(mat), "label"]
 
-mat <- expr[sig, ]
-
-# Replace sample IDs with descriptive labels
-metadata_ordered <- metadata[
-  colnames(mat),
-]
-
-colnames(mat) <- metadata_ordered$label
-
-# Reorder matrix columns to match requested layout
 mat <- mat[, orden]
 
 pheatmap(
@@ -341,61 +222,17 @@ pheatmap(
   show_rownames = FALSE
 )
 
-# 9. Data export
+# 13. Data export (Export expression matrix)
 
-# Export differential expression statistics
-write.csv2(
-  res_df,
-  "All_genes_SalmonTranscriptome_DESeq2.csv",
-  row.names = FALSE
-)
+norm_counts <- counts(dds, normalized = TRUE)
 
-# Export normalized expression matrix
-norm_counts <- counts(
-  dds,
-  normalized = TRUE
-)
+expr_df <- as.data.frame(norm_counts)
+expr_df$Gene <- rownames(expr_df)
 
-expr_df <- as.data.frame(
-  norm_counts
-)
-
-expr_df$Gene <- rownames(
-  expr_df
-)
-
-expr_df <- expr_df[
-  ,
-  c(
-    "Gene",
-    colnames(norm_counts)
-  )
-]
+expr_df <- expr_df[, c("Gene", colnames(norm_counts))]
 
 write.csv2(
   expr_df,
   "Expression_matrix_normalized_counts.csv",
   row.names = FALSE
 )
-
-# 10. Temporary file cleanup
-
-gc()
-
-temp_files <- list.files(
-  path = getwd(),
-  pattern = "fixbam",
-  full.names = TRUE
-)
-
-print(temp_files)
-
-if (length(temp_files) > 0) {
-  unlink(
-    temp_files,
-    force = TRUE
-  )
-  cat("Temporary scratch files successfully removed.\n")
-} else {
-  cat("No temporary scratch files found.\n")
-}
