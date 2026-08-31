@@ -22,7 +22,7 @@ library(ggrepel)
 # 2. Workspace setup & metadata
 
 # Set working directory (Update to your local output folder)
-setwd("<working_dir>/04_Minimap_BAM_FC_DESeq2")
+setwd("<working_dir>")
 
 # Define sample metadata
 metadata <- data.frame(
@@ -32,13 +32,13 @@ metadata <- data.frame(
 )
 rownames(metadata) <- metadata$Sample
 
-# 3. Locate input BAM files
+# 3. Locate input BAM files (change "aln.positionsorted_" for your file name)
 
-bam_dir <- "<input_bam_dir>/04_Minimap_psorted_BAM"
+bam_dir <- "<input_bam_dir>"
 
 bam_files <- list.files(
   bam_dir,
-  pattern = "aln.positionsorted_.*\\.bam$",
+  pattern = "aln.positionsorted_.*\\.bam$", 
   full.names = TRUE
 )
 
