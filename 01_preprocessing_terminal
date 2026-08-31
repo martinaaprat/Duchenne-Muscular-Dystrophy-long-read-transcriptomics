@@ -1,3 +1,5 @@
+# Common code to use for all the pipelines. This is the first step to get the different files that are then used as an input in the different worflows.
+
 # 01_Basecalling
 
 conda activate dorado
