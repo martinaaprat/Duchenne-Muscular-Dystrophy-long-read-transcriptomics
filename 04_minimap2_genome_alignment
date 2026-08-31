@@ -32,17 +32,24 @@ metadata <- data.frame(
 )
 rownames(metadata) <- metadata$Sample
 
-# 3. Locate input BAM files (change "aln.positionsorted_" for your file name)
+# 3. Locate input BAM files
 
+# Update the input directory and file naming pattern according to your files
 bam_dir <- "<input_bam_dir>"
+
+input_prefix <- "<input_file_prefix>"
 
 bam_files <- list.files(
   bam_dir,
-  pattern = "aln.positionsorted_.*\\.bam$", 
+  pattern = paste0(input_prefix, ".*\\.bam$"),
   full.names = TRUE
 )
 
-names(bam_files) <- gsub("aln.positionsorted_|\\.bam", "", basename(bam_files))
+names(bam_files) <- gsub(
+  paste0(input_prefix, "|\\.bam"),
+  "",
+  basename(bam_files)
+)
 
 # 4. FeatureCounts (Gene-level assignment)
 
@@ -59,7 +66,11 @@ fc <- featureCounts(
 counts <- fc$counts
 
 # Clean column headers
-colnames(counts) <- gsub("aln.positionsorted_|\\.bam", "", colnames(counts))
+colnames(counts) <- gsub(
+  paste0(input_prefix, "|\\.bam"),
+  "",
+  colnames(counts)
+)
 
 # Reorder columns to match metadata samples
 counts <- counts[, metadata$Sample]
@@ -73,7 +84,8 @@ dds <- DESeqDataSetFromMatrix(
   design = ~Condition
 )
 
-# Filter out low-expressed genes (at least 10 reads aggregated across samples)
+# Filter out low-expressed genes
+# (at least 10 reads aggregated across samples)
 dds <- dds[rowSums(counts(dds)) >= 10, ]
 
 # Run differential expression analysis
@@ -91,38 +103,85 @@ res_df <- as.data.frame(res)
 res_df$Gene <- rownames(res_df)
 
 # Establish significance flags
-res_df$DEG_flag <- res_df$padj < 0.05 & abs(res_df$log2FoldChange) > 1
-res_df$Up_in <- ifelse(res_df$log2FoldChange > 0, "WT", "Mdx")
+res_df$DEG_flag <- (
+  !is.na(res_df$padj) &
+  res_df$padj < 0.05 &
+  abs(res_df$log2FoldChange) > 1
+)
+
+res_df$Up_in <- ifelse(
+  res_df$log2FoldChange > 0,
+  "WT",
+  "Mdx"
+)
 
 # 6. Data normalization & transformation
 
 # Apply Variance-Stabilizing Transformation (vst) for clustering/plots
-vsd <- vst(dds, blind = FALSE)
+vsd <- vst(
+  dds,
+  blind = FALSE
+)
+
 expr <- assay(vsd)
 
 # 7. Data visualization
 
 # --- Violin Plot ---
+
 df <- melt(expr)
 colnames(df) <- c("Gene", "Sample", "Expression")
 
-df$Label <- metadata[df$Sample, "label"]
-df$Condition <- metadata[df$Sample, "Condition"]
+df$Label <- metadata[
+  df$Sample,
+  "label"
+]
+
+df$Condition <- metadata[
+  df$Sample,
+  "Condition"
+]
 
 # Set factor levels for consistent sample ordering
-orden <- c("WT5","WT6","WT14","Mdx2","Mdx15","Mdx90")
-df$Label <- factor(df$Label, levels = orden)
+orden <- c(
+  "WT5",
+  "WT6",
+  "WT14",
+  "Mdx2",
+  "Mdx15",
+  "Mdx90"
+)
 
-p_violin <- ggplot(df, aes(Label, Expression, fill = Condition)) +
-  geom_violin(alpha = 0.7, trim = TRUE, color = "black") +
-  scale_fill_manual(values = c(
-    "WT" = "skyblue",
-    "Mdx" = "maroon4"
-  )) +
-  coord_cartesian(ylim = c(
-    quantile(df$Expression, 0.01),
-    quantile(df$Expression, 0.99)
-  )) +
+df$Label <- factor(
+  df$Label,
+  levels = orden
+)
+
+p_violin <- ggplot(
+  df,
+  aes(
+    Label,
+    Expression,
+    fill = Condition
+  )
+) +
+  geom_violin(
+    alpha = 0.7,
+    trim = TRUE,
+    color = "black"
+  ) +
+  scale_fill_manual(
+    values = c(
+      "WT" = "skyblue",
+      "Mdx" = "maroon4"
+    )
+  ) +
+  coord_cartesian(
+    ylim = c(
+      quantile(df$Expression, 0.01),
+      quantile(df$Expression, 0.99)
+    )
+  ) +
   theme_bw() +
   labs(
     title = "Expression Distribution across Samples",
@@ -130,41 +189,91 @@ p_violin <- ggplot(df, aes(Label, Expression, fill = Condition)) +
     y = "vst Normalized Expression"
   ) +
   theme(
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    plot.title = element_text(hjust = 0.5)
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    ),
+    plot.title = element_text(
+      hjust = 0.5
+    )
   )
+
 print(p_violin)
 
+
 # --- Principal Component Analysis (PCA) ---
+
 pca <- prcomp(t(expr))
-percentVar <- round(100 * (pca$sdev^2 / sum(pca$sdev^2)), 1)
 
-pca_df <- data.frame(pca$x, metadata)
+percentVar <- round(
+  100 * (pca$sdev^2 / sum(pca$sdev^2)),
+  1
+)
 
-p_pca <- ggplot(pca_df, aes(PC1, PC2, color = Condition)) +
+pca_df <- data.frame(
+  pca$x,
+  metadata
+)
+
+p_pca <- ggplot(
+  pca_df,
+  aes(
+    PC1,
+    PC2,
+    color = Condition
+  )
+) +
   geom_point(size = 5) +
-  geom_text_repel(aes(label = label), size = 4) +
-  scale_color_manual(values = c(
-    "WT" = "skyblue",
-    "Mdx" = "maroon4"
-  )) +
+  geom_text_repel(
+    aes(label = label),
+    size = 4
+  ) +
+  scale_color_manual(
+    values = c(
+      "WT" = "skyblue",
+      "Mdx" = "maroon4"
+    )
+  ) +
   theme_bw() +
   labs(
-    x = paste0("PC1 (", percentVar[1], "%)"),
-    y = paste0("PC2 (", percentVar[2], "%)"),
+    x = paste0(
+      "PC1 (",
+      percentVar[1],
+      "%)"
+    ),
+    y = paste0(
+      "PC2 (",
+      percentVar[2],
+      "%)"
+    ),
     title = "Principal Component Analysis (PCA)"
   )
+
 print(p_pca)
 
+
 # --- Volcano Plot ---
+
 res_df$Significant <- ifelse(
-  !is.na(res_df$padj) & res_df$padj < 0.05 & abs(res_df$log2FoldChange) > 1,
+  !is.na(res_df$padj) &
+    res_df$padj < 0.05 &
+    abs(res_df$log2FoldChange) > 1,
   "YES",
   "NO"
 )
 
-p_volcano <- ggplot(res_df, aes(log2FoldChange, -log10(padj), color = Significant)) +
-  geom_point(alpha = 0.7, size = 1.5) +
+p_volcano <- ggplot(
+  res_df,
+  aes(
+    log2FoldChange,
+    -log10(padj),
+    color = Significant
+  )
+) +
+  geom_point(
+    alpha = 0.7,
+    size = 1.5
+  ) +
   geom_hline(
     yintercept = -log10(0.05),
     linetype = "dashed",
@@ -175,10 +284,12 @@ p_volcano <- ggplot(res_df, aes(log2FoldChange, -log10(padj), color = Significan
     linetype = "dashed",
     color = "black"
   ) +
-  scale_color_manual(values = c(
-    "NO" = "grey70",
-    "YES" = "#D55E00"
-  )) +
+  scale_color_manual(
+    values = c(
+      "NO" = "grey70",
+      "YES" = "#D55E00"
+    )
+  ) +
   theme_bw() +
   labs(
     title = "Differential Expression Volcano Plot",
@@ -186,16 +297,27 @@ p_volcano <- ggplot(res_df, aes(log2FoldChange, -log10(padj), color = Significan
     y = "-log10(padj)",
     color = "Significant"
   )
+
 print(p_volcano)
+
 
 # 8. Heatmap of Differentially Expressed Genes (DEGs)
 
-sig <- res_df$Gene[res_df$DEG_flag == TRUE]
-sig <- intersect(sig, rownames(expr))
+sig <- res_df$Gene[
+  res_df$DEG_flag == TRUE
+]
+
+sig <- intersect(
+  sig,
+  rownames(expr)
+)
 
 mat <- expr[sig, ]
 
-metadata_ordered <- metadata[colnames(mat), ]
+metadata_ordered <- metadata[
+  colnames(mat),
+]
+
 colnames(mat) <- metadata_ordered$label
 
 # Reorder matrix columns to match requested layout
@@ -210,6 +332,7 @@ pheatmap(
   show_rownames = FALSE
 )
 
+
 # 9. Data export
 
 # Export statistics
@@ -220,16 +343,33 @@ write.csv2(
 )
 
 # Export matrix
-norm_counts <- counts(dds, normalized = TRUE)
-expr_df <- as.data.frame(norm_counts)
-expr_df$Gene <- rownames(expr_df)
-expr_df <- expr_df[, c("Gene", colnames(norm_counts))]
+norm_counts <- counts(
+  dds,
+  normalized = TRUE
+)
+
+expr_df <- as.data.frame(
+  norm_counts
+)
+
+expr_df$Gene <- rownames(
+  expr_df
+)
+
+expr_df <- expr_df[
+  ,
+  c(
+    "Gene",
+    colnames(norm_counts)
+  )
+]
 
 write.csv2(
   expr_df,
   "Expression_matrix_normalized_counts.csv",
   row.names = FALSE
 )
+
 
 # 10. Temporary file cleanup
 
@@ -244,7 +384,10 @@ temp_files <- list.files(
 print(temp_files)
 
 if (length(temp_files) > 0) {
-  unlink(temp_files, force = TRUE)
+  unlink(
+    temp_files,
+    force = TRUE
+  )
   cat("Temporary scratch files successfully removed.\n")
 } else {
   cat("No temporary scratch files found.\n")
