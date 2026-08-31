@@ -1,9 +1,6 @@
 # This script performs gene-level quantification using Rsubread: featureCounts from position-sorted BAM files, followed by differential expression analysis using DESeq2.
 
-# In Linux
-
-
-# Move to RStudio
+# In RStudio
 
 # 1. Package installation & activation
 
