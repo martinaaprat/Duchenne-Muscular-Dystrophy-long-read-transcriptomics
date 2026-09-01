@@ -9,6 +9,9 @@ library(reshape2)
 library(ggplot2)
 library(dplyr)
 
+rm(list = ls())
+graphics.off()
+
 # 2. Workspace setup & metadata
 
 # Set working directory (Update to your working directory)
