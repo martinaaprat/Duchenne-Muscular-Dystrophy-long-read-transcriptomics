@@ -1,4 +1,4 @@
-# Duchenne-Muscular-Dystrophy-long-read-transcriptomics
+# Duchenne-Muscular-Dystrophy-long-read-transcriptomics 
 
 This repository contains the computational pipelines and bioinformatic workflows developed for my **Final Degree Project (TFG) in Biomedical Sciences** at the **Instituto Químico de Sarria (IQS)**, Barcelona. The project focuses on performing a transcriptomic analysis of Duchenne Muscular Dystrophy mouse models using long-read Nanopore sequencing to identify candidate biomarkers for personalised genetic therapies.
 
