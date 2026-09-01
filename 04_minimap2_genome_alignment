@@ -4,13 +4,14 @@
 
 # 1. Package installation & activation
 
-# Install Bioconductor manager if not present
-if (!requireNamespace("BiocManager", quietly = TRUE)) {
+if (!requireNamespace("BiocManager", quietly = TRUE))
   install.packages("BiocManager")
-}
 
-# Install Rsubread package if needed
-# BiocManager::install("Rsubread")
+BiocManager::install("Rsubread")
+BiocManager::install("DESeq2")
+BiocManager::install("apeglm")
+
+install.packages(c("ggplot2", "pheatmap", "reshape2", "ggrepel", "MASS"))
 
 library(Rsubread)
 library(DESeq2)
@@ -18,6 +19,11 @@ library(ggplot2)
 library(pheatmap)
 library(reshape2)
 library(ggrepel)
+library(apeglm)
+library(MASS)
+
+rm(list = ls())
+graphics.off()
 
 # 2. Workspace setup & metadata
 
@@ -55,15 +61,18 @@ names(bam_files) <- gsub(
 
 fc <- featureCounts(
   files = bam_files,
-  annot.ext = "<gtf_annotation_file>/GCF_000001635.27/genomic.gtf",
+  annot.ext = "Annotation_file_dir",
   isGTFAnnotationFile = TRUE,
   GTF.featureType = "exon",
   GTF.attrType = "gene_id",
   useMetaFeatures = TRUE,
-  isPairedEnd = FALSE   # Single-end sequencing dataset
+  isPairedEnd = FALSE,
+  isLongRead = TRUE,
+  nthreads = 1
 )
 
 counts <- fc$counts
+colnames(counts) <- names(bam_files)
 
 # Clean column headers
 colnames(counts) <- gsub(
@@ -85,7 +94,6 @@ dds <- DESeqDataSetFromMatrix(
 )
 
 # Filter out low-expressed genes
-# (at least 10 reads aggregated across samples)
 dds <- dds[rowSums(counts(dds)) >= 10, ]
 
 # Run differential expression analysis
@@ -102,17 +110,16 @@ res <- lfcShrink(
 res_df <- as.data.frame(res)
 res_df$Gene <- rownames(res_df)
 
-# Establish significance flags
-res_df$DEG_flag <- (
-  !is.na(res_df$padj) &
-  res_df$padj < 0.05 &
+# Establish significance flags + export
+res_df$DEG_flag <- res_df$padj < 0.05 &
   abs(res_df$log2FoldChange) > 1
-)
 
-res_df$Up_in <- ifelse(
-  res_df$log2FoldChange > 0,
-  "WT",
-  "Mdx"
+res_df$Up_in <- ifelse(res_df$log2FoldChange > 0, "WT", "Mdx")
+
+write.csv2(
+  res_df,
+  "All_genes_featureCounts_DESeq2.csv",
+  row.names = FALSE
 )
 
 # 6. Data normalization & transformation
@@ -129,128 +136,96 @@ expr <- assay(vsd)
 
 # --- Violin Plot ---
 
-df <- melt(expr)
-colnames(df) <- c("Gene", "Sample", "Expression")
+df <- melt(expr
+colnames(df) <- c("Gene","Sample","Expression")
+df$Label <- metadata[df$Sample, "label"]
+df$Condition <- metadata[df$Sample, "Condition"]
+orden <- c("WT5","WT6","WT14","Mdx2","Mdx15","Mdx90")
+df$Label <- factor(df$Label, levels = orden)
 
-df$Label <- metadata[
-  df$Sample,
-  "label"
-]
-
-df$Condition <- metadata[
-  df$Sample,
-  "Condition"
-]
-
-# Set factor levels for consistent sample ordering
-orden <- c(
-  "WT5",
-  "WT6",
-  "WT14",
-  "Mdx2",
-  "Mdx15",
-  "Mdx90"
-)
-
-df$Label <- factor(
-  df$Label,
-  levels = orden
-)
-
-p_violin <- ggplot(
-  df,
-  aes(
-    Label,
-    Expression,
-    fill = Condition
-  )
-) +
-  geom_violin(
-    alpha = 0.7,
-    trim = TRUE,
-    color = "black"
-  ) +
-  scale_fill_manual(
-    values = c(
-      "WT" = "skyblue",
-      "Mdx" = "maroon4"
-    )
-  ) +
-  coord_cartesian(
-    ylim = c(
-      quantile(df$Expression, 0.01),
-      quantile(df$Expression, 0.99)
-    )
-  ) +
+ggplot(df, aes(Label, Expression, fill = Condition)) +
+  geom_violin(alpha = 0.7, trim = TRUE, color = "black") +
+  scale_fill_manual(values = c(
+    "WT" = "skyblue",
+    "Mdx" = "maroon4"
+  )) +
+  
+  coord_cartesian(ylim = c(
+    quantile(df$Expression, 0.01),
+    quantile(df$Expression, 0.99)
+  )) +
+  
   theme_bw() +
+
   labs(
-    title = "Expression Distribution across Samples",
     x = "Sample",
-    y = "vst Normalized Expression"
+    y = "Expression"    
   ) +
+  
   theme(
-    axis.text.x = element_text(
-      angle = 45,
-      hjust = 1
-    ),
-    plot.title = element_text(
-      hjust = 0.5
-    )
+    axis.text.x = element_text(angle = 45, hjust = 1),
   )
-
-print(p_violin)
-
 
 # --- Principal Component Analysis (PCA) ---
 
 pca <- prcomp(t(expr))
+percentVar <- round(100 * (pca$sdev^2 / sum(pca$sdev^2)), 1)
+pca_df <- data.frame(pca$x, metadata)
 
-percentVar <- round(
-  100 * (pca$sdev^2 / sum(pca$sdev^2)),
-  1
-)
-
-pca_df <- data.frame(
-  pca$x,
-  metadata
-)
-
-p_pca <- ggplot(
+ggplot(
   pca_df,
-  aes(
-    PC1,
-    PC2,
-    color = Condition
-  )
+  aes(PC1, PC2, color = Condition)
 ) +
+  
   geom_point(size = 5) +
+  geom_text_repel(aes(label = label), size = 4) +
+  scale_color_manual(values = c(
+    "WT" = "skyblue",
+    "Mdx" = "maroon4"
+  )) +
+  
+  theme_bw() +
+  
+  labs(  
+    x = paste0("PC1 (", percentVar[1], "%)"),
+    y = paste0("PC2 (", percentVar[2], "%)"),
+    title = "PCA"
+  )
+
+# --- Linear Discriminant Analysis (LDA) ---
+
+pca_df <- as.data.frame(pca$x[, 1:3])  # 2-3 PCs es suficiente
+
+pca_df$Condition <- metadata$Condition
+pca_df$label <- metadata$label
+
+lda_model <- lda(Condition ~ PC1 + PC2 + PC3, data = pca_df)
+
+lda_pred <- predict(lda_model)
+
+lda_vals <- as.data.frame(lda_pred$x)
+lda_vals$Condition <- pca_df$Condition
+lda_vals$label <- pca_df$label
+
+ggplot(lda_vals, aes(x = LD1, y = Condition, color = Condition)) +
+  geom_jitter(height = 0.1, size = 5) +
   geom_text_repel(
     aes(label = label),
     size = 4
   ) +
-  scale_color_manual(
-    values = c(
-      "WT" = "skyblue",
-      "Mdx" = "maroon4"
-    )
-  ) +
+  scale_color_manual(values = c(
+    "WT" = "skyblue",
+    "Mdx" = "maroon4"
+  )) +
   theme_bw() +
   labs(
-    x = paste0(
-      "PC1 (",
-      percentVar[1],
-      "%)"
-    ),
-    y = paste0(
-      "PC2 (",
-      percentVar[2],
-      "%)"
-    ),
-    title = "Principal Component Analysis (PCA)"
+    title = "LDA (WT vs Mdx)",
+    x = "LD1",
+    y = "Condition"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5)
   )
-
-print(p_pca)
-
 
 # --- Volcano Plot ---
 
@@ -262,114 +237,72 @@ res_df$Significant <- ifelse(
   "NO"
 )
 
-p_volcano <- ggplot(
+ggplot(
   res_df,
-  aes(
-    log2FoldChange,
-    -log10(padj),
-    color = Significant
-  )
+  aes(log2FoldChange, -log10(padj), color = Significant)
 ) +
-  geom_point(
-    alpha = 0.7,
-    size = 1.5
-  ) +
+  
+  geom_point(alpha = 0.7, size = 1.5) +
   geom_hline(
     yintercept = -log10(0.05),
     linetype = "dashed",
     color = "black"
   ) +
+  
   geom_vline(
     xintercept = c(-1, 1),
     linetype = "dashed",
     color = "black"
   ) +
+  
   scale_color_manual(
     values = c(
       "NO" = "grey70",
       "YES" = "#D55E00"
     )
   ) +
+  
   theme_bw() +
+  
   labs(
-    title = "Differential Expression Volcano Plot",
+    title = "Volcano plot",
     x = "log2 Fold Change",
     y = "-log10(padj)",
     color = "Significant"
   )
 
-print(p_volcano)
-
-
 # 8. Heatmap of Differentially Expressed Genes (DEGs)
 
-sig <- res_df$Gene[
-  res_df$DEG_flag == TRUE
-]
-
-sig <- intersect(
-  sig,
-  rownames(expr)
-)
-
+sig <- res_df$Gene[res_df$DEG_flag == TRUE]
+sig <- intersect(sig, rownames(expr))
 mat <- expr[sig, ]
-
-metadata_ordered <- metadata[
-  colnames(mat),
-]
-
+metadata_ordered <- metadata[colnames(mat), ]
 colnames(mat) <- metadata_ordered$label
+orden <- c("WT5","WT6","WT14","Mdx2","Mdx15","Mdx90")
 
-# Reorder matrix columns to match requested layout
 mat <- mat[, orden]
 
 pheatmap(
   mat,
   scale = "row",
+  show_rownames = FALSE,
   fontsize_row = 4,
   fontsize_col = 10,
-  cluster_cols = TRUE,
-  show_rownames = FALSE
+  cluster_cols = TRUE
 )
-
 
 # 9. Data export
 
-# Export statistics
-write.csv2(
-  res_df,
-  "All_genes_featureCounts_DESeq2.csv",
-  row.names = FALSE
-)
+norm_counts <- counts(dds, normalized = TRUE)
+expr_df <- as.data.frame(norm_counts)
+expr_df$Gene <- rownames(expr_df)
+expr_df <- expr_df[, c("Gene", colnames(norm_counts))]
 
-# Export matrix
-norm_counts <- counts(
-  dds,
-  normalized = TRUE
-)
-
-expr_df <- as.data.frame(
-  norm_counts
-)
-
-expr_df$Gene <- rownames(
-  expr_df
-)
-
-expr_df <- expr_df[
-  ,
-  c(
-    "Gene",
-    colnames(norm_counts)
-  )
-]
-
-write.csv2(
+write.csv2(  
   expr_df,
   "Expression_matrix_normalized_counts.csv",
   row.names = FALSE
 )
-
 
 # 10. Temporary file cleanup
 
@@ -388,7 +321,7 @@ if (length(temp_files) > 0) {
     temp_files,
     force = TRUE
   )
-  cat("Temporary scratch files successfully removed.\n")
+  cat("Temporary scratch files successfully removed\n")
 } else {
-  cat("No temporary scratch files found.\n")
+  cat("No temporary scratch files found\n")
 }
