@@ -2,16 +2,12 @@
 
 # 1. Package installation & activation
 
-# Install Bioconductor manager if not present
 if (!requireNamespace("BiocManager", quietly = TRUE)) {
   install.packages("BiocManager")
 }
 
-# Install required Bioconductor packages
-# BiocManager::install(c("tximport", "edgeR", "limma", "pheatmap"))
-
-# Install standard CRAN packages
-# install.packages(c("tidyverse", "ggplot2", "reshape2", "ggrepel"))
+BiocManager::install(c("tximport", "edgeR", "limma", "pheatmap"))
+install.packages(c("tidyverse", "ggplot2", "reshape2", "ggrepel"))
 
 library(tximport)
 library(edgeR)
@@ -22,14 +18,13 @@ library(pheatmap)
 library(reshape2)
 library(ggrepel)
 
-# Clean environment
 rm(list = ls())
 graphics.off()
 
 # 2. Workspace setup & metadata
 
 # Set working directory (Update to your local working directory)
-setwd("<working_dir>/03_Salmon_FASTQ_Voom_Limma")
+setwd("<working_dir>")
 
 # Define sample metadata
 metadata <- data.frame(
@@ -49,7 +44,7 @@ files <- list.files(
 # Assign clean sample names
 names(files) <- gsub("quant_|\\.sf", "", basename(files))
 
-# Import transcript-level counts keeping transcript resolution (txOut = TRUE)
+# Import transcript-level counts keeping transcript resolution
 txi <- tximport(files, type = "salmon", txOut = TRUE)
 counts <- txi$counts
 
@@ -112,7 +107,6 @@ colnames(df) <- c("Gene", "Sample", "Expression")
 df$Condition <- metadata[df$Sample, "Condition"]
 df$Label <- metadata[df$Sample, "label"]
 
-# Set factor levels for consistent sample ordering
 df$Label <- factor(df$Label, levels = c("WT5","WT6","WT14","Mdx2","Mdx15","Mdx90"))
 
 p_violin <- ggplot(df, aes(x = Label, y = Expression, fill = Condition)) +
