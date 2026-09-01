@@ -1,13 +1,18 @@
 # This script performs exploratory analysis of transcript-level abundance using Salmon's TPM values.
 
-# Load required libraries
+# 1. Package installation & activation
+
+install.packages(c("tidyverse", "reshape2"))
+
 library(tidyverse)
 library(reshape2)
 library(ggplot2)
 library(dplyr)
 
-# Set working directory (Update to your local/working directory if needed)
-setwd("<output_dir>/01_Salmon_FASTQ_TPM")
+# 2. Workspace setup & metadata
+
+# Set working directory (Update to your working directory)
+setwd("<output_dir>")
 
 # Define sample metadata
 metadata <- data.frame(
@@ -17,14 +22,14 @@ metadata <- data.frame(
 )
 rownames(metadata) <- metadata$Sample
 
-# Locate Salmon output .sf files
+# 3. Data import (Salmon .sf Files)
+
 files <- list.files(
   "<input_salmon_fastq_dir>",
   pattern = "quant_.*\\.sf$",
   full.names = TRUE
 )
 
-# Extract sample names from file paths
 Samples <- gsub("quant_|\\.sf", "", basename(files))
 
 # Import and merge TPM data from all samples
@@ -32,6 +37,8 @@ tpm_list <- lapply(files, function(f){
   read.delim(f) %>%
     dplyr::select(Name, TPM)
 })
+
+4. Processing & statistical modeling
 
 merged <- Reduce(function(x, y) full_join(x, y, by = "Name"), tpm_list)
 colnames(merged) <- c("Gene", Samples)
@@ -60,8 +67,9 @@ df$Label <- factor(df$Label, levels = orden)
 y_min <- 0
 y_max <- 1
 
-# Plot 1: Violin Plot
+# 5. Data visualization
 
+# --- Violin Plot ---
 p1 <- ggplot(df, aes(Label, Expression, fill = Condition)) +
   geom_violin(alpha = 0.7, trim = TRUE, color = "black") +
   scale_fill_manual(values = c(
@@ -81,7 +89,7 @@ p1 <- ggplot(df, aes(Label, Expression, fill = Condition)) +
 
 print(p1)
 
-# Plot 2: Intra-sample visualization of relative abundance (Top 30 transcripts)
+# --- Intra-sample visualization of relative abundance (Top 30 transcripts) ---
 
 # Specify target sample for intra-sample visualization (e.g., "BC09")
 target_sample <- "<target_sample_ID>" 
