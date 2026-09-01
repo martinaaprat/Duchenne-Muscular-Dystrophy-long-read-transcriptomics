@@ -18,4 +18,4 @@ salmon quant \
   -p 8
 
 # 02_Select_pipeline
-# Once the Salmon .sf files are obstained, you can move onto RStudio to proceed, with the three variants of Pipeline 1 (1A, 1B and 1C)
+# Once the Salmon .sf files are obtained you can move onto RStudio to proceed with the three variants of Pipeline 1 (1A, 1B and 1C)
